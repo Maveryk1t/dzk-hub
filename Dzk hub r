@@ -1,6 +1,6 @@
 --[[
     Maveryk Hub - Pet Swarm Simulator
-    Versão: Insane Farme com Multi-Threads e Velocidade Ajustável
+    Versão: Insane Farme com Multi-Threads, Velocidade Ajustável e Uso de Todos os Pets
     Desenvolvido por Maveryk1t
 ]]
 
@@ -163,7 +163,7 @@ local eggData = {
 --[[
     FUNÇÕES AUXILIARES
     - Gerenciamento de cache
-    - Ataques e coleta
+    - Ataques e coleta (agora usando TODOS os pets)
 ]]
 
 -- Pegar zona do cache
@@ -199,11 +199,13 @@ local function getNests()
     return cache.nests.value
 end
 
--- Atacar inimigo com 1 pet (simples e eficiente)
+-- Atacar inimigo com TODOS os pets disponíveis
 local function attackEnemy(enemy)
     local pets = getPets()
     if #pets == 0 then return end
-    pcall(CombatRemote.InvokeServer, CombatRemote, "AttackEnemy", enemy, pets[1])
+    for _, pet in ipairs(pets) do
+        pcall(CombatRemote.InvokeServer, CombatRemote, "AttackEnemy", enemy, pet)
+    end
 end
 
 -- Atacar todos inimigos de uma zona
@@ -236,19 +238,21 @@ local function attackSpecificEnemy(zoneName, enemyName, needsRequest)
     end
 end
 
--- Atacar todos os bosses vivos
+-- Atacar todos os bosses vivos com TODOS os pets
 local function attackBosses()
     for _, boss in ipairs(activeBosses) do
         if boss and boss.Parent then
             local pets = getPets()
             if #pets > 0 then
-                pcall(CombatRemote.InvokeServer, CombatRemote, "AttackEnemy", boss, pets[1])
+                for _, pet in ipairs(pets) do
+                    pcall(CombatRemote.InvokeServer, CombatRemote, "AttackEnemy", boss, pet)
+                end
             end
         end
     end
 end
 
--- Coletar comida de uma zona
+-- Coletar comida de uma zona com TODOS os pets
 local function collectFoodFromZone(zoneName)
     local zone = getZone(zoneName)
     if zone and zone:FindFirstChild("FoodSpawns") then
@@ -256,7 +260,9 @@ local function collectFoodFromZone(zoneName)
         for _, f in ipairs(foods) do
             local pets = getPets()
             if #pets > 0 then
-                pcall(CollectionRemote.InvokeServer, CollectionRemote, "CollectFood", f, pets[1])
+                for _, pet in ipairs(pets) do
+                    pcall(CollectionRemote.InvokeServer, CollectionRemote, "CollectFood", f, pet)
+                end
             end
         end
     end
