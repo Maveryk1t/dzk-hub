@@ -1,7 +1,7 @@
 --[[
     Maveryk Hub - Pet Swarm Simulator
     Versão: Insane Farme com Controle de Velocidade e Threads
-    Desenvolvido por Maveryk1t
+    (Corrigido: food agora funciona junto com enemies)
 ]]
 
 -- Carregar biblioteca de interface
@@ -16,18 +16,18 @@ local RunService = game:GetService("RunService")
 local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 
--- Remotes (comandos do jogo)
+-- Remotes
 local Remotes = ReplicatedStorage and ReplicatedStorage:FindFirstChild("Remotes")
 local Functions = Remotes and Remotes:FindFirstChild("Functions")
 local Events = Remotes and Remotes:FindFirstChild("Events")
 
-local CombatRemote = Functions and Functions:FindFirstChild("CombatRF")           -- Atacar
-local CollectionRemote = Functions and Functions:FindFirstChild("CollectionRF")   -- Coletar comida
-local HatchRemote = Events and Events:FindFirstChild("HatchEggEvent")             -- Chocar ovo
-local PlantRemote = Events and Events:FindFirstChild("PlantEggEvent")             -- Plantar ovo
-local FeedRemote = Events and Events:FindFirstChild("FeedEggEvent")               -- Alimentar ninho
-local SacrificeRemote = Functions and Functions:FindFirstChild("SacrificeFunction") -- Sacrificar
-local ZonesRF = Functions and Functions:FindFirstChild("ZonesRF")                 -- Carregar zona
+local CombatRemote = Functions and Functions:FindFirstChild("CombatRF")
+local CollectionRemote = Functions and Functions:FindFirstChild("CollectionRF")
+local HatchRemote = Events and Events:FindFirstChild("HatchEggEvent")
+local PlantRemote = Events and Events:FindFirstChild("PlantEggEvent")
+local FeedRemote = Events and Events:FindFirstChild("FeedEggEvent")
+local SacrificeRemote = Functions and Functions:FindFirstChild("SacrificeFunction")
+local ZonesRF = Functions and Functions:FindFirstChild("ZonesRF")
 
 -- Variáveis de controle
 local active = false
@@ -81,7 +81,7 @@ local bossList = {
 }
 for _, name in ipairs(bossList) do bossEnabled[name] = true end
 
--- Lista de inimigos (fixa, como no original)
+-- Lista de inimigos fixa
 local enemyList = {
     { name = "Summer", zone = "SummerEventZone", attackAll = true },
     { name = "Winter", zone = "WinterEventZone", attackAll = true },
@@ -117,13 +117,13 @@ local config = {
     doubleJump = false,
     antiAfk = false,
     wallspeed = 16,
-    -- Velocidades específicas
-    enemySpeed = 0.1,      -- 0.03 a 0.5
-    foodSpeed = 0.1,       -- 0.03 a 0.5
-    bossSpeed = 0.5,       -- 0.2 a 1
-    hatchSpeed = 0.1,      -- 0.03 a 0.5
-    plantSpeed = 0.1,      -- 0.001 a 2 (mantido)
-    plantThreads = 1,      -- 1 a 10
+    enemySpeed = 0.1,
+    foodSpeed = 0.1,
+    bossSpeed = 0.5,
+    hatchSpeed = 0.1,
+    plantSpeed = 0.1,
+    plantThreads = 1,
+    nestsSpeed = 0.1,
 }
 
 -- Lista de ovos
@@ -151,9 +151,7 @@ local eggData = {
     { name = "Legendary Egg", zone = "14" },
 }
 
---[[
-    FUNÇÕES AUXILIARES
-]]
+--[[ FUNÇÕES AUXILIARES ]]
 
 local function getZone(name)
     return cache.zones[name]
@@ -186,9 +184,9 @@ local function getNests()
     return cache.nests.value
 end
 
--- Rate limiting global
+-- Rate limiting
 local lastAttack = 0
-local ATTACK_COOLDOWN = 0.03 -- mínimo
+local ATTACK_COOLDOWN = 0.03
 
 local function attackEnemy(enemy)
     local now = os.clock()
@@ -239,18 +237,14 @@ local function sacrificePet(petName)
     return success
 end
 
---[[
-    SISTEMA DE PRIORIDADES E WORKERS
-]]
+--[[ FILAS DE ALVOS ]]
 
--- Filas de alvos
 local targetQueue = {
     bosses = {},
     enemies = {},
     food = {},
 }
 
--- Atualizar filas
 local function updateBossQueue()
     if not config.farmBosses then targetQueue.bosses = {}; return end
     local new = {}
@@ -303,7 +297,18 @@ local function updateFoodQueue()
     targetQueue.food = new
 end
 
--- Workers com velocidades configuráveis
+-- Atualização periódica das filas
+task.spawn(function()
+    while true do
+        updateBossQueue()
+        updateEnemyQueue()
+        updateFoodQueue()
+        task.wait(0.5)
+    end
+end)
+
+--[[ WORKERS (todos rodam em paralelo) ]]
+
 -- Bosses
 task.spawn(function()
     while true do
@@ -321,7 +326,7 @@ end)
 -- Enemies
 task.spawn(function()
     while true do
-        if active and config.farmEnemies and #targetQueue.bosses == 0 then
+        if active and config.farmEnemies then
             for _, enemy in ipairs(targetQueue.enemies) do
                 if enemy and enemy.Parent then
                     attackEnemy(enemy)
@@ -335,7 +340,7 @@ end)
 -- Food
 task.spawn(function()
     while true do
-        if active and config.farmFood and #targetQueue.bosses == 0 and #targetQueue.enemies == 0 then
+        if active and config.farmFood then
             for _, food in ipairs(targetQueue.food) do
                 if food and food.Parent then
                     collectFood(food)
@@ -346,7 +351,7 @@ task.spawn(function()
     end
 end)
 
--- Hatch (worker único)
+-- Hatch
 task.spawn(function()
     while true do
         if active and config.autoHatch then
@@ -367,19 +372,17 @@ task.spawn(function()
                 end
             end
         end
-        task.wait(config.nestsSpeed or 0.1) -- usa o mesmo do hatch ou um separado? vou manter um separado
+        task.wait(config.nestsSpeed)
     end
 end)
 
 -- Plantio com múltiplas threads
 local plantThreads = {}
 local function startPlantThreads()
-    -- Parar threads antigas
     for _, thread in ipairs(plantThreads) do
         task.cancel(thread)
     end
     plantThreads = {}
-    
     for i = 1, config.plantThreads do
         plantThreads[i] = task.spawn(function()
             while active and config.autoPlant and #eggsSelected > 0 do
@@ -392,22 +395,7 @@ local function startPlantThreads()
     end
 end
 
--- Quando config.plantThreads mudar, reinicia as threads
--- Isso será feito no callback do slider
-
--- Atualizar filas periodicamente
-task.spawn(function()
-    while true do
-        updateBossQueue()
-        updateEnemyQueue()
-        updateFoodQueue()
-        task.wait(0.5)
-    end
-end)
-
---[[
-    SISTEMA DE SACRIFÍCIO
-]]
+--[[ SACRIFÍCIO ]]
 local sacrificeActive = {
     queen = false, king = false, frozen = false,
     walrus = false, fennec = false, mystic = false
@@ -435,9 +423,7 @@ local function toggleSacrifice(petName, enable)
     end
 end
 
---[[
-    ANTI-AFK
-]]
+--[[ ANTI-AFK ]]
 local function startAntiAfk()
     if antiAfkConnection then return end
     antiAfkConnection = RunService.Heartbeat:Connect(function()
@@ -456,9 +442,7 @@ local function stopAntiAfk()
     end
 end
 
---[[
-    CONTROLE DO FARM
-]]
+--[[ CONTROLE ]]
 local function start()
     if active then return end
     active = true
@@ -466,8 +450,7 @@ local function start()
     updateEnemyQueue()
     updateFoodQueue()
     if config.antiAfk then startAntiAfk() end
-    startPlantThreads() -- inicia threads de plantio
-    -- Inicia sacrifícios
+    startPlantThreads()
     for pet, enabled in pairs(sacrificeActive) do
         if enabled then toggleSacrifice(pet, true) end
     end
@@ -486,9 +469,7 @@ local function stop()
     stopAntiAfk()
 end
 
---[[
-    INTERFACE GRÁFICA
-]]
+--[[ INTERFACE ]]
 local win = Rayfield:CreateWindow({
     Name = "Maveryk Hub",
     LoadingTitle = "Pet Swarm Sim",
@@ -497,7 +478,7 @@ local win = Rayfield:CreateWindow({
     Theme = "Dark"
 })
 
--- ABA PRINCIPAL
+-- Main Tab
 local mainTab = win:CreateTab("Main")
 mainTab:CreateSection("Control")
 mainTab:CreateButton({ Name = "Start Farming", Callback = start })
@@ -542,12 +523,10 @@ mainTab:CreateLabel("developed by Maveryk1t")
 mainTab:CreateLabel("yt: Maveryk1t")
 mainTab:CreateLabel("discord: knzd1")
 
--- ABA INIMIGOS (fixa, como no original)
+-- Enemies Tab
 local enemiesTab = win:CreateTab("Enemies")
 enemiesTab:CreateSection("Enemy Farming")
 enemiesTab:CreateToggle({ Name = "Enable Enemies", CurrentValue = config.farmEnemies, Callback = function(v) config.farmEnemies = v end })
-
--- Slider de velocidade para inimigos
 enemiesTab:CreateSlider({
     Name = "Enemy Attack Speed",
     Range = {0.03, 0.5},
@@ -555,30 +534,23 @@ enemiesTab:CreateSlider({
     CurrentValue = config.enemySpeed,
     Callback = function(v) config.enemySpeed = v end
 })
-
 enemiesTab:CreateSection("Event Enemies")
 enemiesTab:CreateToggle({ Name = "Summer (All)", CurrentValue = enemyEnabled[1], Callback = function(v) enemyEnabled[1] = v end })
 enemiesTab:CreateToggle({ Name = "Winter (All)", CurrentValue = enemyEnabled[2], Callback = function(v) enemyEnabled[2] = v end })
 enemiesTab:CreateToggle({ Name = "Sphinx (Evil Eagle)", CurrentValue = enemyEnabled[3], Callback = function(v) enemyEnabled[3] = v end })
-
 enemiesTab:CreateSection("Desert")
 enemiesTab:CreateToggle({ Name = "Cursed Mummy", CurrentValue = enemyEnabled[4], Callback = function(v) enemyEnabled[4] = v end })
-
 enemiesTab:CreateSection("Sky")
 enemiesTab:CreateToggle({ Name = "Crazy Unicorn", CurrentValue = enemyEnabled[5], Callback = function(v) enemyEnabled[5] = v end })
-
 enemiesTab:CreateSection("Tiki")
 enemiesTab:CreateToggle({ Name = "Terror Tree", CurrentValue = enemyEnabled[6], Callback = function(v) enemyEnabled[6] = v end })
-
 enemiesTab:CreateSection("Draco")
 enemiesTab:CreateToggle({ Name = "Draco's Guard", CurrentValue = enemyEnabled[7], Callback = function(v) enemyEnabled[7] = v end })
 
--- ABA COMIDA
+-- Food Tab
 local foodTab = win:CreateTab("Food")
 foodTab:CreateSection("Food Zones")
 foodTab:CreateToggle({ Name = "Enable Food", CurrentValue = config.farmFood, Callback = function(v) config.farmFood = v end })
-
--- Slider de velocidade para comida
 foodTab:CreateSlider({
     Name = "Food Collection Speed",
     Range = {0.03, 0.5},
@@ -586,16 +558,13 @@ foodTab:CreateSlider({
     CurrentValue = config.foodSpeed,
     Callback = function(v) config.foodSpeed = v end
 })
-
 foodTab:CreateToggle({ Name = "Crystal Food", CurrentValue = foodZones[1].enabled, Callback = function(v) foodZones[1].enabled = v end })
 foodTab:CreateToggle({ Name = "Draco Food", CurrentValue = foodZones[2].enabled, Callback = function(v) foodZones[2].enabled = v end })
 
--- ABA BOSSES
+-- Bosses Tab
 local bossTab = win:CreateTab("Bosses")
 bossTab:CreateSection("Boss Control")
 bossTab:CreateToggle({ Name = "Enable Boss Farming", CurrentValue = config.farmBosses, Callback = function(v) config.farmBosses = v end })
-
--- Slider de velocidade para bosses
 bossTab:CreateSlider({
     Name = "Boss Attack Speed",
     Range = {0.2, 1},
@@ -603,11 +572,9 @@ bossTab:CreateSlider({
     CurrentValue = config.bossSpeed,
     Callback = function(v) config.bossSpeed = v end
 })
-
 bossTab:CreateToggle({ Name = "Enable All Bosses", CurrentValue = true, Callback = function(v)
     for _, name in ipairs(bossList) do bossEnabled[name] = v end
 end })
-
 bossTab:CreateSection("Boss List")
 for _, name in ipairs(bossList) do
     bossTab:CreateToggle({
@@ -617,7 +584,7 @@ for _, name in ipairs(bossList) do
     })
 end
 
--- ABA OVOS
+-- Eggs Tab
 local eggTab = win:CreateTab("Eggs")
 eggTab:CreateSection("Eggs Control")
 eggTab:CreateToggle({ Name = "Auto Plant", CurrentValue = config.autoPlant, Callback = function(v)
@@ -626,7 +593,6 @@ eggTab:CreateToggle({ Name = "Auto Plant", CurrentValue = config.autoPlant, Call
 end })
 eggTab:CreateToggle({ Name = "Auto Hatch", CurrentValue = config.autoHatch, Callback = function(v) config.autoHatch = v end })
 eggTab:CreateToggle({ Name = "Auto Nests", CurrentValue = config.autoNests, Callback = function(v) config.autoNests = v end })
-
 eggTab:CreateSection("Speeds")
 eggTab:CreateSlider({
     Name = "Plant Speed",
@@ -646,11 +612,9 @@ eggTab:CreateSlider({
     Name = "Nests Speed",
     Range = {0.03, 0.5},
     Increment = 0.01,
-    CurrentValue = config.nestsSpeed or 0.1,
+    CurrentValue = config.nestsSpeed,
     Callback = function(v) config.nestsSpeed = v end
 })
-
--- Número de threads para plantio
 eggTab:CreateSlider({
     Name = "Plant Threads",
     Range = {1, 10},
@@ -661,7 +625,6 @@ eggTab:CreateSlider({
         if active then startPlantThreads() end
     end
 })
-
 eggTab:CreateSection("Select Eggs")
 for _, egg in ipairs(eggData) do
     eggTab:CreateToggle({
@@ -679,7 +642,6 @@ for _, egg in ipairs(eggData) do
         end
     })
 end
-
 eggTab:CreateButton({
     Name = "Remove Hatch Animation",
     Callback = function()
@@ -690,54 +652,25 @@ eggTab:CreateButton({
     end
 })
 
--- ABA SACRIFÍCIO (igual ao original)
+-- Sacrifice Tab
 local sacrificeTab = win:CreateTab("Sacrifice")
 sacrificeTab:CreateSection("Summer Event")
-sacrificeTab:CreateToggle({
-    Name = "Queen Bee (Mythical) - Loop",
-    CurrentValue = sacrificeActive.queen,
-    Callback = function(v) sacrificeActive.queen = v; toggleSacrifice("Queen Bee", v) end
-})
+sacrificeTab:CreateToggle({ Name = "Queen Bee (Mythical) - Loop", CurrentValue = sacrificeActive.queen, Callback = function(v) sacrificeActive.queen = v; toggleSacrifice("Queen Bee", v) end })
 sacrificeTab:CreateButton({ Name = "Sacrifice Queen Bee (Once)", Callback = function() sacrificePet("Queen Bee") end })
-
-sacrificeTab:CreateToggle({
-    Name = "King Bee (Legendary) - Loop",
-    CurrentValue = sacrificeActive.king,
-    Callback = function(v) sacrificeActive.king = v; toggleSacrifice("King Bee", v) end
-})
+sacrificeTab:CreateToggle({ Name = "King Bee (Legendary) - Loop", CurrentValue = sacrificeActive.king, Callback = function(v) sacrificeActive.king = v; toggleSacrifice("King Bee", v) end })
 sacrificeTab:CreateButton({ Name = "Sacrifice King Bee (Once)", Callback = function() sacrificePet("King Bee") end })
-
 sacrificeTab:CreateSection("Winter Event")
-sacrificeTab:CreateToggle({
-    Name = "Frozen Werewolf (Mythical) - Loop",
-    CurrentValue = sacrificeActive.frozen,
-    Callback = function(v) sacrificeActive.frozen = v; toggleSacrifice("Frozen Werewolf", v) end
-})
+sacrificeTab:CreateToggle({ Name = "Frozen Werewolf (Mythical) - Loop", CurrentValue = sacrificeActive.frozen, Callback = function(v) sacrificeActive.frozen = v; toggleSacrifice("Frozen Werewolf", v) end })
 sacrificeTab:CreateButton({ Name = "Sacrifice Frozen Werewolf (Once)", Callback = function() sacrificePet("Frozen Werewolf") end })
-
-sacrificeTab:CreateToggle({
-    Name = "Walrus (Legendary) - Loop",
-    CurrentValue = sacrificeActive.walrus,
-    Callback = function(v) sacrificeActive.walrus = v; toggleSacrifice("Walrus", v) end
-})
+sacrificeTab:CreateToggle({ Name = "Walrus (Legendary) - Loop", CurrentValue = sacrificeActive.walrus, Callback = function(v) sacrificeActive.walrus = v; toggleSacrifice("Walrus", v) end })
 sacrificeTab:CreateButton({ Name = "Sacrifice Walrus (Once)", Callback = function() sacrificePet("Walrus") end })
-
 sacrificeTab:CreateSection("Sphinx Event")
-sacrificeTab:CreateToggle({
-    Name = "Fennec Fox (Mythical) - Loop",
-    CurrentValue = sacrificeActive.fennec,
-    Callback = function(v) sacrificeActive.fennec = v; toggleSacrifice("Fennec Fox", v) end
-})
+sacrificeTab:CreateToggle({ Name = "Fennec Fox (Mythical) - Loop", CurrentValue = sacrificeActive.fennec, Callback = function(v) sacrificeActive.fennec = v; toggleSacrifice("Fennec Fox", v) end })
 sacrificeTab:CreateButton({ Name = "Sacrifice Fennec Fox (Once)", Callback = function() sacrificePet("Fennec Fox") end })
-
-sacrificeTab:CreateToggle({
-    Name = "Mystic Camel (Legendary) - Loop",
-    CurrentValue = sacrificeActive.mystic,
-    Callback = function(v) sacrificeActive.mystic = v; toggleSacrifice("Mystic Camel", v) end
-})
+sacrificeTab:CreateToggle({ Name = "Mystic Camel (Legendary) - Loop", CurrentValue = sacrificeActive.mystic, Callback = function(v) sacrificeActive.mystic = v; toggleSacrifice("Mystic Camel", v) end })
 sacrificeTab:CreateButton({ Name = "Sacrifice Mystic Camel (Once)", Callback = function() sacrificePet("Mystic Camel") end })
 
--- ABA MISC
+-- Misc Tab
 local miscTab = win:CreateTab("Misc")
 miscTab:CreateSection("Movement")
 miscTab:CreateToggle({ Name = "Infinite Double Jump", CurrentValue = config.doubleJump, Callback = function(v)
@@ -763,19 +696,16 @@ miscTab:CreateToggle({ Name = "Infinite Double Jump", CurrentValue = config.doub
         jumpCount = 0
     end
 end })
-
 miscTab:CreateSlider({ Name = "Walk Speed", Range = {16, 100}, Increment = 1, CurrentValue = config.wallspeed, Callback = function(v)
     config.wallspeed = v
     local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     if humanoid then humanoid.WalkSpeed = v end
 end })
-
 miscTab:CreateSection("Anti-AFK")
 miscTab:CreateToggle({ Name = "Enable Anti-AFK", CurrentValue = config.antiAfk, Callback = function(v)
     config.antiAfk = v
     if v and active then startAntiAfk() elseif not v then stopAntiAfk() end
 end })
-
 miscTab:CreateSection("Hotkey")
 miscTab:CreateLabel("Press H to hide/show GUI")
 
