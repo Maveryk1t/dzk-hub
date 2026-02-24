@@ -1,4 +1,3 @@
-
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -248,34 +247,38 @@ local function attackBosses()
     end
 end
 
-local function collectFoodUltraFast(zoneName)
-    local zone = getZone(zoneName)
-    if not zone then return end
-    local foodSpawns = zone:FindFirstChild("FoodSpawns")
-    if not foodSpawns then return end
-    
-    local foods = foodSpawns:GetChildren()
-    local pets = getPets()
-    local petCount = #pets
-    if petCount == 0 or #foods == 0 then return end
-    
-    for i = 1, petCount do
-        local food = foods[((i-1) % #foods) + 1]
-        local pet = pets[i]
-        safeCollectFood(food, pet)
+-- NOVA FUNÇÃO DE COLETA DE FOOD (inspirada no attackAllEnemies)
+local function collectAllFood()
+    for _, foodZone in ipairs(foodZones) do
+        if foodZone.enabled then
+            local zone = getZone(foodZone.zone)
+            if zone and zone:FindFirstChild("FoodSpawns") then
+                local foods = zone.FoodSpawns:GetChildren()
+                local pets = getPets()
+                local petCount = #pets
+                if petCount == 0 or #foods == 0 then
+                    -- Sem alimentos ou sem pets, pula
+                else
+                    -- Distribui cada pet para um food diferente
+                    for i = 1, petCount do
+                        local food = foods[((i-1) % #foods) + 1]
+                        local pet = pets[i]
+                        safeCollectFood(food, pet)
+                    end
+                end
+            end
+        end
     end
 end
 
 local function foodWorker()
     while active do
         if config.farmFood then
-            for _, foodZone in ipairs(foodZones) do
-                if foodZone.enabled then
-                    collectFoodUltraFast(foodZone.zone)
-                end
-            end
+            collectAllFood()
+            task.wait(0.3)  -- Mesmo delay do farm de enemies
+        else
+            task.wait(2)
         end
-        task.wait(0.001)
     end
 end
 
@@ -495,7 +498,7 @@ local function start()
     
     game:GetService("StarterGui"):SetCore("SendNotification", {
         Title = "Maveryk Hub",
-        Text = "Farm iniciado! Food ultra rápido.",
+        Text = "Farm iniciado! Food no mesmo padrão dos enemies.",
         Duration = 3
     })
 end
@@ -510,7 +513,7 @@ end
 local win = Rayfield:CreateWindow({
     Name = "Maveryk Hub",
     LoadingTitle = "Pet Swarm Sim",
-    LoadingSubtitle = "Food Ultra Rápido",
+    LoadingSubtitle = "Food no padrão enemies",
     ConfigurationSaving = { Enabled = true, FolderName = "MaverykHub", FileName = "Config" },
     Theme = "Dark"
 })
@@ -845,6 +848,6 @@ end)
 
 game:GetService("StarterGui"):SetCore("SendNotification", {
     Title = "Maveryk Hub",
-    Text = "Carregado! Food ultra rápido.",
+    Text = "Carregado! Food no padrão enemies.",
     Duration = 3
 })
